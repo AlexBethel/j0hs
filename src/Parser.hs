@@ -77,6 +77,7 @@ data TypeName
 data ExecItem
   = ExecVarDecl VarDecl
   | ExecEval Expr
+  | RetStmt Expr
   | IfStmt
       { ifCondition :: Expr,
         ifBody :: [ExecItem],
@@ -121,3 +122,4 @@ primTypes =
     "long",
     "void"
   ]
+
