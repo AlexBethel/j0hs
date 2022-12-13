@@ -31,6 +31,7 @@ data Expr
   | -- This also includes casts
     CallOp Expr [Expr]
   | LiteralExpr Literal
+  | VarExpr String
   | -- Here the Expr is just the length of the array; contents can't
     -- be initialized in the declaration.
     NewArray TypeName Expr
