@@ -112,6 +112,7 @@ data FnDecl = FnDecl
     fnStatic :: Bool,
     fnRetType :: TypeName,
     fnName :: String,
+    fnParams :: [(TypeName, String)],
     fnBody :: [ExecItem]
   }
   deriving (Show)
@@ -328,6 +329,12 @@ parseVarDecl =
     <*> parseTypeName
     <*> sepBy parseIdent (sym ',') <* sym ';'
 
+parseFnArg :: Parser (TypeName, String)
+parseFnArg =
+  (,)
+    <$> parseTypeName
+    <*> parseIdent
+
 parseFnDecl :: Parser FnDecl
 parseFnDecl =
   FnDecl
@@ -335,12 +342,22 @@ parseFnDecl =
     <*> optionBool (word "static")
     <*> parseTypeName
     <*> parseIdent
+    <*> between
+      (sym '(')
+      (sym ')')
+      ( sepBy
+          ( (,)
+              <$> parseTypeName
+              <*> parseIdent
+          )
+          (sym ',')
+      )
     <*> between (sym '{') (sym '}') (many parseExecItem)
 
 parseClassItem :: Parser ClassItem
 parseClassItem =
   choice
-    [ ClassVarDecl <$> parseVarDecl,
+    [ try $ ClassVarDecl <$> parseVarDecl,
       ClassFnDecl <$> parseFnDecl
     ]
 
