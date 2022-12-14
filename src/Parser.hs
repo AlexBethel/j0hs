@@ -125,7 +125,8 @@ data TypeName
 
 -- TODO: Switch statements.
 data ExecItem
-  = ExecVarDecl VarDecl
+  = Block [ExecItem]
+  | ExecVarDecl VarDecl
   | ExecEval Expr
   | RetStmt Expr
   | IfStmt
@@ -275,6 +276,10 @@ sym = lexeme . void . char
 optionBool :: Parser a -> Parser Bool
 optionBool p = isJust <$> optionMaybe p
 
+parseBlock :: Parser ExecItem
+parseBlock =
+  Block <$> between (sym '{') (sym '}') (many parseExecItem)
+
 parseVarDeclStmt :: Parser ExecItem
 parseVarDeclStmt = ExecVarDecl <$> parseVarDecl
 
@@ -313,7 +318,8 @@ parseForStmt =
 parseExecItem :: Parser ExecItem
 parseExecItem =
   choice
-    [ parseReturnStmt,
+    [ parseBlock,
+      parseReturnStmt,
       parseIfStmt,
       parseWhileStmt,
       parseForStmt,
