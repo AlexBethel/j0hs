@@ -327,7 +327,7 @@ parseVarDecl =
     <$> optionBool (word "public")
     <*> optionBool (word "static")
     <*> parseTypeName
-    <*> sepBy parseIdent (sym ',') <* sym ';'
+    <*> parseIdent `sepBy` sym ',' <* sym ';'
 
 parseFnArg :: Parser (TypeName, String)
 parseFnArg =
@@ -345,12 +345,11 @@ parseFnDecl =
     <*> between
       (sym '(')
       (sym ')')
-      ( sepBy
-          ( (,)
-              <$> parseTypeName
-              <*> parseIdent
-          )
-          (sym ',')
+      ( ( (,)
+            <$> parseTypeName
+            <*> parseIdent
+        )
+          `sepBy` sym ','
       )
     <*> between (sym '{') (sym '}') (many parseExecItem)
 
@@ -378,7 +377,7 @@ parseBuiltinType =
     )
 
 parseClassType :: Parser TypeName
-parseClassType = ClassType <$> sepBy parseIdent (sym '.')
+parseClassType = ClassType <$> parseIdent `sepBy` sym '.'
 
 parseTypeName :: Parser TypeName
 parseTypeName = do
@@ -451,7 +450,7 @@ parseConstruction =
     <*> between
       (sym '(')
       (sym ')')
-      (sepBy parseExpr (sym ','))
+      (parseExpr `sepBy` sym ',')
 
 -- The base expression parser, which includes literals (1, 2.5,
 -- "hello"), variables (print, x), parentheses, and constructors.
@@ -569,7 +568,7 @@ eGroupCalls base = do
       between
         (sym '(')
         (sym ')')
-        (sepBy parseExpr (sym ','))
+        (parseExpr `sepBy` sym ',')
   pure $ foldl CallOp first calls
 
 parseExpr :: Parser Expr
@@ -606,7 +605,7 @@ parseExpr =
 
 parseImport :: Parser [String]
 parseImport =
-  word "import" *> sepBy1 parseIdent (sym '.') <* sym ';'
+  word "import" *> parseIdent `sepBy1` sym '.' <* sym ';'
 
 parseSourceFile :: Parser SourceFile
 parseSourceFile =
