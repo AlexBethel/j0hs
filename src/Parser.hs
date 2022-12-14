@@ -559,13 +559,15 @@ eGroupSubscripts base = do
       subscripts
 
 eGroupCalls :: Parser Expr -> Parser Expr
-eGroupCalls base =
-  CallOp
-    <$> base
-    <*> between
-      (sym '(')
-      (sym ')')
-      (sepBy parseExpr (sym ','))
+eGroupCalls base = do
+  first <- base
+  calls <-
+    many $
+      between
+        (sym '(')
+        (sym ')')
+        (sepBy parseExpr (sym ','))
+  pure $ foldl CallOp first calls
 
 parseExpr :: Parser Expr
 parseExpr =
