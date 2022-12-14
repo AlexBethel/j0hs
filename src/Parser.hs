@@ -491,8 +491,10 @@ eGroupMulDiv =
 eGroupIncDec :: Parser Expr -> Parser Expr
 eGroupIncDec =
   parseSuffixes
-    [ Increment <$ word "++",
-      Decrement <$ word "--"
+  -- These are prefixes of the + and - operators, therefore need
+  -- lookahead.
+    [ try $ Increment <$ word "++",
+      try $ Decrement <$ word "--"
     ]
 
 eGroupNegate :: Parser Expr -> Parser Expr
