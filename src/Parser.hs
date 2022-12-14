@@ -292,7 +292,7 @@ parseIfStmt =
             *> between (sym '(') (sym ')') parseExpr
         )
     <*> parseExecItem
-    <*> optionMaybe parseExecItem
+    <*> optionMaybe (word "else" *> parseExecItem)
 
 parseWhileStmt :: Parser ExecItem
 parseWhileStmt =
