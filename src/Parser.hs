@@ -491,8 +491,8 @@ eGroupMulDiv =
 eGroupIncDec :: Parser Expr -> Parser Expr
 eGroupIncDec =
   parseSuffixes
-  -- These are prefixes of the + and - operators, therefore need
-  -- lookahead.
+    -- These are prefixes of the + and - operators, therefore need
+    -- lookahead.
     [ try $ Increment <$ word "++",
       try $ Decrement <$ word "--"
     ]
@@ -506,12 +506,13 @@ eGroupNegate =
 eGroupCompare :: Parser Expr -> Parser Expr
 eGroupCompare =
   parseInfixes
-    [ EqOp <$ word "==",
+    -- Use lookahead for operations that are prefixes of others.
+    [ try $ EqOp <$ word "==",
       NeqOp <$ word "!=",
+      try $ GteOp <$ word ">=",
+      try $ LteOp <$ word "<=",
       GtOp <$ word ">",
-      LtOp <$ word "<",
-      GteOp <$ word ">=",
-      LteOp <$ word "<="
+      LtOp <$ word "<"
     ]
     AssocLeft
 
