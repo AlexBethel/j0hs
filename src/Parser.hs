@@ -43,6 +43,7 @@ data SourceFile = SourceFile
   { imports :: [[String]],
     classes :: [ClassDecl]
   }
+  deriving (Show)
 
 data Expr
   = Assignment Expr Expr
@@ -74,12 +75,14 @@ data Expr
     -- be initialized in the declaration.
     NewArray TypeName Expr
   | NewClass TypeName [Expr]
+  deriving (Show)
 
 data Literal
   = IntLit Integer
   | RealLit Double
   | CharLit Char
   | StringLit String
+  deriving (Show)
 
 data ClassDecl = ClassDecl
   { clsPublic :: Bool,
@@ -87,11 +90,13 @@ data ClassDecl = ClassDecl
     clsName :: String,
     clsMembers :: [ClassItem]
   }
+  deriving (Show)
 
 -- TODO: allow constructors
 data ClassItem
   = ClassVarDecl VarDecl
   | ClassFnDecl FnDecl
+  deriving (Show)
 
 -- TODO: names can also be arrays (brackets on the right).
 data VarDecl = VarDecl
@@ -100,6 +105,7 @@ data VarDecl = VarDecl
     varType :: TypeName,
     varNames :: [String]
   }
+  deriving (Show)
 
 data FnDecl = FnDecl
   { fnPublic :: Bool,
@@ -108,11 +114,13 @@ data FnDecl = FnDecl
     fnName :: String,
     fnBody :: [ExecItem]
   }
+  deriving (Show)
 
 data TypeName
   = BuiltinType String
   | ClassType [String]
   | ArrayType TypeName
+  deriving (Show)
 
 -- TODO: Switch statements.
 data ExecItem
@@ -134,6 +142,7 @@ data ExecItem
         forIncrement :: Expr,
         forBody :: ExecItem
       }
+  deriving (Show)
 
 reservedWords :: [String]
 reservedWords =
@@ -340,7 +349,7 @@ parseClassDecl =
   ClassDecl
     <$> optionBool (word "public")
     <*> optionBool (word "static")
-    <*> parseIdent
+    <*> (word "class" *> parseIdent)
     <*> between (sym '{') (sym '}') (many parseClassItem)
 
 parseBuiltinType :: Parser TypeName

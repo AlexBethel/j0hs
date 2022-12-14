@@ -1,4 +1,12 @@
-module Lib (doSomething) where
+module Lib (runTest) where
 
-doSomething :: IO ()
-doSomething = putStrLn "It works"
+import Parser (parseSourceFile)
+import System.Environment (getArgs)
+import Text.Parsec (runParser)
+
+runTest :: IO ()
+runTest = do
+  [filename] <- getArgs
+  text <- readFile filename
+  let x = runParser parseSourceFile () filename text
+  print x

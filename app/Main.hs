@@ -1,6 +1,6 @@
 module Main where
 
-import Lib (doSomething)
+import Lib (runTest)
 
 main :: IO ()
-main = doSomething
+main = runTest
