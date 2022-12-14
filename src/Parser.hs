@@ -318,13 +318,13 @@ parseForStmt =
 parseExecItem :: Parser ExecItem
 parseExecItem =
   choice
-    [ parseBlock,
+    [ try parseVarDeclStmt,
+      parseEvalStmt,
+      parseBlock,
       parseReturnStmt,
       parseIfStmt,
       parseWhileStmt,
-      parseForStmt,
-      parseVarDeclStmt,
-      parseEvalStmt
+      parseForStmt
     ]
 
 parseVarDecl :: Parser VarDecl
@@ -333,7 +333,7 @@ parseVarDecl =
     <$> optionBool (word "public")
     <*> optionBool (word "static")
     <*> parseTypeName
-    <*> parseIdent `sepBy` sym ',' <* sym ';'
+    <*> parseIdent `sepBy1` sym ',' <* sym ';'
 
 parseFnArg :: Parser (TypeName, String)
 parseFnArg =
