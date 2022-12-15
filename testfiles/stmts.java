@@ -10,8 +10,7 @@ public class LinkedList {
     }
 
     public void forEach(Consumer c) {
-        LinkedList cur;
-        cur = this;
+        LinkedList cur = this;
         while (cur != null) {
             c.consume(cur.data);
             cur = cur.next;
