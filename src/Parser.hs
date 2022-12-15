@@ -103,7 +103,7 @@ data VarDecl = VarDecl
   { varPublic :: Bool,
     varStatic :: Bool,
     varType :: TypeName,
-    varNames :: [String]
+    varNames :: [(String, Maybe Expr)]
   }
   deriving (Show)
 
@@ -333,7 +333,12 @@ parseVarDecl =
     <$> optionBool (word "public")
     <*> optionBool (word "static")
     <*> parseTypeName
-    <*> parseIdent `sepBy1` sym ',' <* sym ';'
+    <*> ( (,)
+            <$> parseIdent
+            <*> optionMaybe (sym '=' *> parseExpr)
+        )
+      `sepBy1` sym ','
+      <* sym ';'
 
 parseFnArg :: Parser (TypeName, String)
 parseFnArg =
