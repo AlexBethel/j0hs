@@ -1,12 +1,14 @@
 module Lib (runTest) where
 
-import Parser (parseSourceFile)
+import Parser (parseFiles)
 import System.Environment (getArgs)
 import Text.Parsec (runParser)
+import Typeck (toplevelTypeEnv)
 
 runTest :: IO ()
 runTest = do
-  [filename] <- getArgs
-  text <- readFile filename
-  let x = runParser parseSourceFile () filename text
-  print x
+  filenames <- getArgs
+  parsed <- parseFiles filenames
+  case parsed of
+    Left err -> putStrLn err
+    Right asts -> print $ toplevelTypeEnv asts

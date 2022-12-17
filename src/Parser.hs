@@ -1,5 +1,6 @@
 module Parser
   ( parseSourceFile,
+    parseFiles,
     SourceFile (..),
     Expr (..),
     Literal (..),
@@ -37,11 +38,12 @@ import Text.Parsec
     (<?>),
     (<|>),
   )
+import Text.Parsec.Prim (runParser)
 import Text.Parsec.String (Parser)
 
--- TODO: add a package declaration to source files.
 data SourceFile = SourceFile
-  { imports :: [[String]],
+  { package :: [String],
+    imports :: [[String]],
     classes :: [ClassDecl]
   }
   deriving (Show)
@@ -620,6 +622,10 @@ parseExpr =
       eGroupAssignment
     ]
 
+parsePackage :: Parser [String]
+parsePackage =
+  word "package" *> parseIdent `sepBy1` sym '.' <* sym ';'
+
 parseImport :: Parser [String]
 parseImport =
   word "import" *> parseIdent `sepBy1` sym '.' <* sym ';'
@@ -627,6 +633,16 @@ parseImport =
 parseSourceFile :: Parser SourceFile
 parseSourceFile =
   SourceFile
-    <$> (many space *> many parseImport)
+    <$> (many space *> parsePackage)
+    <*> many parseImport
     <*> many parseClassDecl
     <* eof
+
+parseFiles :: [String] -> IO (Either String [SourceFile])
+parseFiles files = do
+  texts <- sequence (readFile <$> files)
+  let results = zipWith (runParser parseSourceFile ()) files texts
+      firstErr = sequence results
+  pure $ case firstErr of
+    Left err -> Left (show err)
+    Right succ -> Right succ

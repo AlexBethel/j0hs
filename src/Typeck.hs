@@ -2,10 +2,12 @@ module Typeck
   ( J0Type (..),
     TypeEnv (..),
     lookupType,
+    toplevelTypeEnv,
   )
 where
 
 import Control.Monad (zipWithM_)
+import Data.Bifunctor (first)
 import Parser
   ( ClassDecl (..),
     ClassItem (..),
@@ -17,7 +19,6 @@ import Parser
     TypeName (..),
     VarDecl (..),
   )
-import Data.Bifunctor (first)
 
 -- Types that an identifier or expression can have.
 data J0Type
@@ -196,7 +197,7 @@ toplevelTypeEnv :: [SourceFile] -> TypeEnv
 toplevelTypeEnv files =
   TypeEnv $
     builtinTypeEnv ++ do
-      SourceFile imports classes <- files
+      SourceFile package imports classes <- files
       ClassDecl public static name members <- classes
       pure
         ( name,
