@@ -42,7 +42,7 @@ import Text.Parsec.Prim (runParser)
 import Text.Parsec.String (Parser)
 
 data SourceFile = SourceFile
-  { package :: [String],
+  { package :: Maybe [String],
     imports :: [[String]],
     classes :: [ClassDecl]
   }
@@ -624,7 +624,9 @@ parseExpr =
 
 parsePackage :: Parser [String]
 parsePackage =
-  word "package" *> parseIdent `sepBy1` sym '.' <* sym ';'
+  -- This `try` is a nasty hack to make `package` not collide with
+  -- `public class`. It makes me sad :c
+  try (word "package") *> parseIdent `sepBy1` sym '.' <* sym ';'
 
 parseImport :: Parser [String]
 parseImport =
@@ -633,7 +635,7 @@ parseImport =
 parseSourceFile :: Parser SourceFile
 parseSourceFile =
   SourceFile
-    <$> (many space *> parsePackage)
+    <$> (many space *> optionMaybe parsePackage)
     <*> many parseImport
     <*> many parseClassDecl
     <* eof
