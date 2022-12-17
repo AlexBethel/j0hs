@@ -114,7 +114,9 @@ data FnDecl = FnDecl
     fnRetType :: TypeName,
     fnName :: String,
     fnParams :: [(TypeName, String)],
-    fnBody :: [ExecItem]
+    -- fnBody can be the name of a symbol for an "extern" function, or
+    -- the body of the function.
+    fnBody :: Either String [ExecItem]
   }
   deriving (Show)
 
@@ -363,7 +365,10 @@ parseFnDecl =
         )
           `sepBy` sym ','
       )
-    <*> between (sym '{') (sym '}') (many parseExecItem)
+    <*> choice
+      [ Right <$> between (sym '{') (sym '}') (many parseExecItem),
+        Left <$> (word "extern" *> parseIdent <* sym ';')
+      ]
 
 parseClassItem :: Parser ClassItem
 parseClassItem =
