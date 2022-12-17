@@ -39,6 +39,7 @@ import Text.Parsec
   )
 import Text.Parsec.String (Parser)
 
+-- TODO: add a package declaration to source files.
 data SourceFile = SourceFile
   { imports :: [[String]],
     classes :: [ClassDecl]
@@ -118,9 +119,9 @@ data FnDecl = FnDecl
   deriving (Show)
 
 data TypeName
-  = BuiltinType String
-  | ClassType [String]
-  | ArrayType TypeName
+  = BuiltinTypeName String
+  | ClassTypeName [String]
+  | ArrayTypeName TypeName
   deriving (Show)
 
 -- TODO: Switch statements.
@@ -383,12 +384,12 @@ parseBuiltinType :: Parser TypeName
 parseBuiltinType =
   choice
     ( map
-        (\tname -> word tname $> BuiltinType tname)
+        (\tname -> word tname $> BuiltinTypeName tname)
         primTypes
     )
 
 parseClassType :: Parser TypeName
-parseClassType = ClassType <$> parseIdent `sepBy` sym '.'
+parseClassType = ClassTypeName <$> parseIdent `sepBy` sym '.'
 
 parseTypeName :: Parser TypeName
 parseTypeName = do
@@ -400,7 +401,7 @@ parseTypeName = do
   -- N.B. Parsing array types directly would be left-recursive; we
   -- instead parse them here as suffixes.
   arrSuffixes <- many (sym '[' <* sym ']')
-  pure $ foldl (const . ArrayType) base arrSuffixes
+  pure $ foldl (const . ArrayTypeName) base arrSuffixes
 
 data Assoc = AssocLeft | AssocRight
 

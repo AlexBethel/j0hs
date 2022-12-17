@@ -27,6 +27,7 @@ library
   exposed-modules:
       Lib
       Parser
+      Typeck
   other-modules:
       Paths_j0hs
   hs-source-dirs:
