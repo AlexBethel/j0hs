@@ -1,4 +1,7 @@
 public class Functions {
+    int thingo;
+    int otherThing;
+
     public void doSomething() {
     }
 

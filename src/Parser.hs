@@ -155,8 +155,8 @@ reservedWords :: [String]
 reservedWords =
   [ "boolean",
     "break",
+    "byte",
     "case",
-    "char",
     "class",
     "continue",
     "default",
@@ -180,7 +180,7 @@ reservedWords =
 primTypes :: [String]
 primTypes =
   [ "boolean",
-    "char",
+    "byte",
     "double",
     "float",
     "int",

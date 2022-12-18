@@ -3,6 +3,7 @@ module Typeck
     TypeEnv (..),
     lookupType,
     toplevelTypeEnv,
+    functionEnv,
   )
 where
 
@@ -238,3 +239,18 @@ builtinTypeEnv =
     ("long", ClassType "long" []),
     ("void", ClassType "void" [])
   ]
+
+-- Builds a type environment for a function or block within a larger
+-- type environment.
+functionEnv :: TypeEnv -> [ExecItem] -> TypeEnv
+functionEnv (TypeEnv parent) items =
+  TypeEnv (childEnv items ++ parent)
+  where
+    childEnv :: [ExecItem] -> [(String, J0Type)]
+    childEnv items = do
+      item <- items
+      case item of
+        ExecVarDecl (VarDecl public static typ names) -> do
+          (name, initVal) <- names
+          [(name, nameToType typ)]
+        _ -> []

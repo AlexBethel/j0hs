@@ -4,6 +4,7 @@ import Parser (parseFiles)
 import System.Environment (getArgs)
 import Text.Parsec (runParser)
 import Typeck (toplevelTypeEnv)
+import Codegen (codegen)
 
 runTest :: IO ()
 runTest = do
@@ -11,4 +12,9 @@ runTest = do
   parsed <- parseFiles filenames
   case parsed of
     Left err -> putStrLn err
-    Right asts -> print $ toplevelTypeEnv asts
+    Right asts -> do
+      -- print $ toplevelTypeEnv asts
+      -- print $ codegen asts
+      case codegen asts of
+        Left err -> putStrLn err
+        Right succ -> putStr succ
