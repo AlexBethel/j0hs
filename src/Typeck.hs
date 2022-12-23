@@ -70,20 +70,14 @@ nameToType name = case name of
 typeckExpr :: TypeEnv -> Expr -> Either String J0Type
 typeckExpr env expr = case expr of
   Assignment l r -> exprEq env l r
-  AddOp l r -> typeckBinArith env l r
-  SubOp l r -> typeckBinArith env l r
-  MulOp l r -> typeckBinArith env l r
-  DivOp l r -> typeckBinArith env l r
-  ModOp l r -> typeckBinArith env l r
-  Increment e -> do
-    et <- typeckExpr env e
-    arithmetic et
-  Decrement e -> do
-    et <- typeckExpr env e
-    arithmetic et
-  Negate e -> do
-    et <- typeckExpr env e
-    arithmetic et
+  AddOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  SubOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  MulOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  DivOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  ModOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  Increment _ -> typeckExpr env $ desugarArithmetic expr
+  Decrement _ -> typeckExpr env $ desugarArithmetic expr
+  Negate _ -> typeckExpr env $ desugarArithmetic expr
   EqOp l r -> do
     lt <- typeckExpr env l
     rt <- typeckExpr env r
@@ -92,13 +86,13 @@ typeckExpr env expr = case expr of
     lt <- typeckExpr env l
     rt <- typeckExpr env r
     typEq lt rt
-  GtOp l r -> typeckBinArith env l r
-  LtOp l r -> typeckBinArith env l r
-  GteOp l r -> typeckBinArith env l r
-  LteOp l r -> typeckBinArith env l r
-  AndOp l r -> typeckBinLogic env l r
-  OrOp l r -> typeckBinLogic env l r
-  NotOp e -> typeckExpr env e >>= typEq (ObjectType ["boolean"])
+  GtOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  LtOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  GteOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  LteOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  AndOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  OrOp _ _ -> typeckExpr env $ desugarArithmetic expr
+  NotOp _ -> typeckExpr env $ desugarArithmetic expr
   InstanceOf l r -> do
     -- Wait, why does this operator exist in j0? In j0 there's no
     -- subclassing, therefore you can always tell this statically at
@@ -108,13 +102,7 @@ typeckExpr env expr = case expr of
     case (lt, rt) of
       (ObjectType _, ClassType _ _) -> pure $ ObjectType ["boolean"]
       _ -> Left "illegal instanceof"
-  SubscriptOp l r -> do
-    lt <- typeckExpr env l
-    rt <- typeckExpr env r
-    case lt of
-      ArrayType _ -> pure ()
-      _ -> Left "illegal array subscript on something not an array"
-    typEq (ObjectType ["int"]) rt
+  SubscriptOp _ _ -> typeckExpr env $ desugarArithmetic expr
   DotOp e sub -> do
     et <- typeckExpr env e
     case et of
@@ -178,20 +166,27 @@ exprEq env l r = do
   rt <- typeckExpr env r
   typEq lt rt
 
--- Asserts that a type can have arithmetic performed on it.
-arithmetic :: J0Type -> Either String J0Type
-arithmetic t =
-  if t `elem` [ObjectType ["int"], ObjectType ["double"]]
-    then pure t
-    else Left ("not arithmetic type " ++ show t)
-
--- Type-checks a binary arithmetic operation.
-typeckBinArith :: TypeEnv -> Expr -> Expr -> Either String J0Type
-typeckBinArith env l r = exprEq env l r >>= arithmetic
-
--- Type-checks a binary logical operation.
-typeckBinLogic :: TypeEnv -> Expr -> Expr -> Either String J0Type
-typeckBinLogic env l r = exprEq env l r >>= typEq (ObjectType ["boolean"])
+-- Translates an expression into its underlying meaning. E.g.,
+-- converts `a + b` into `a.__add__(b)`. Our dialect of J0 implements
+-- operator overloading, unlike Java.
+desugarArithmetic :: Expr -> Expr
+desugarArithmetic e = case e of
+  AddOp l r -> CallOp (DotOp l "__add__") [r]
+  SubOp l r -> CallOp (DotOp l "__sub__") [r]
+  MulOp l r -> CallOp (DotOp l "__mul__") [r]
+  DivOp l r -> CallOp (DotOp l "__div__") [r]
+  ModOp l r -> CallOp (DotOp l "__mod__") [r]
+  Increment x -> Assignment x (AddOp x (LiteralExpr (IntLit 1)))
+  Decrement x -> Assignment x (SubOp x (LiteralExpr (IntLit 1)))
+  Negate x -> CallOp (DotOp x "__negate__") []
+  GtOp l r -> CallOp (DotOp l "__gt__") [r]
+  LtOp l r -> CallOp (DotOp l "__lt__") [r]
+  GteOp l r -> CallOp (DotOp l "__gte__") [r]
+  LteOp l r -> CallOp (DotOp l "__lte__") [r]
+  AndOp l r -> CallOp (DotOp l "__and__") [r]
+  OrOp l r -> CallOp (DotOp l "__or__") [r]
+  NotOp x -> CallOp (DotOp x "__not__") []
+  SubscriptOp l r -> CallOp (DotOp l "__subscript__") [r]
 
 -- Builds a TypeEnv from a list of source files.
 toplevelTypeEnv :: [SourceFile] -> TypeEnv
