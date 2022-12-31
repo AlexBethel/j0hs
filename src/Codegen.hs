@@ -94,9 +94,13 @@
 
 module Codegen (codegen) where
 
-import Data.Coerce (coerce)
-import Data.Int (Int64)
+import Control.Monad (forM_)
+import Control.Monad.State (StateT (runStateT), get, gets, put)
+import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
+import Control.Monad.Trans.Writer (Writer, runWriter, tell)
 import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import Foreign
   ( Int64,
     Ptr,
@@ -145,7 +149,7 @@ import Parser
     FnDecl (FnDecl),
     Literal (CharLit, IntLit, RealLit, StringLit),
     SourceFile (SourceFile),
-    VarDecl (VarDecl),
+    VarDecl (VarDecl, varNames, varStatic),
   )
 import System.IO.Unsafe (unsafePerformIO)
 import Typeck
@@ -158,138 +162,209 @@ import Typeck
     typeckExpr,
   )
 
+-- Monad used for code generation. Can fail with an error message, and
+-- change the state of the function-local information, and emit
+-- arbitrary lines of assembly code, while maintaining some value.
+type Codegen a = ExceptT String (StateT CodegenState (Writer [String])) a
+
+-- State of the code generator.
+data CodegenState = CodegenState
+  { stateEnv :: TypeEnv,
+    nextLabelIndex :: Int
+  }
+
 -- Generates x86 assembly from a list of source files. Returns either
 -- an error message, or the complete assembly code of the program.
 codegen :: [SourceFile] -> Either String String
 codegen files =
-  let env = toplevelTypeEnv files
-   in concat <$> sequence (codegenFile env <$> files)
+  let exceptStep = runExceptT (codegenInner files)
+      stateStep =
+        runStateT exceptStep $
+          CodegenState
+            { stateEnv = toplevelTypeEnv files,
+              nextLabelIndex = 0
+            }
+      writerStep = runWriter stateStep
+      ((maybeError, finalState), code) = writerStep
+   in do
+        maybeError
+        pure $ unlines code
 
-codegenFile :: TypeEnv -> SourceFile -> Either String String
-codegenFile env (SourceFile package imports classes) =
-  concat <$> sequence (codegenClass env <$> classes)
+putInstruction :: String -> Codegen ()
+putInstruction = lift . lift . tell . pure
 
-codegenClass :: TypeEnv -> ClassDecl -> Either String String
-codegenClass env cls =
-  let (ClassDecl public static name members) = cls
-      layout = do
-        member <- members
-        case member of
-          ClassFnDecl _ -> []
-          ClassVarDecl (VarDecl public static typ names) ->
-            fst <$> names
-   in concat
-        <$> sequence
-          [ codegenInitializer env cls,
-            codegenAlloc env name layout,
-            codegenGetSet env name layout,
-            codegenFns env cls
-          ]
+putInstructions :: [String] -> Codegen ()
+putInstructions = mapM_ putInstruction
+
+label :: Codegen String
+label = do
+  state <- get
+  let idx = nextLabelIndex state
+  put $
+    CodegenState
+      { stateEnv = stateEnv state,
+        nextLabelIndex = idx + 1
+      }
+  pure $ "zxlabel" ++ show idx
+
+codegenInner :: [SourceFile] -> Codegen ()
+codegenInner = mapM_ codegenFile
+
+codegenFile :: SourceFile -> Codegen ()
+codegenFile (SourceFile package imports classes) =
+  mapM_ codegenClass classes
+
+codegenClass :: ClassDecl -> Codegen ()
+codegenClass cls = do
+  let ClassDecl public static name members = cls
+      layout = genLayout members
+  codegenInitializer cls
+  codegenAlloc name layout
+  codegenGetSet name layout
+  mapM_ (codegenFn name) members
+
+type VarLayout = [String]
+
+genLayout :: [ClassItem] -> VarLayout
+genLayout members = do
+  member <- members
+  case member of
+    ClassVarDecl (VarDecl {varStatic = False, varNames = names}) ->
+      fst <$> names
+    _ -> mempty
 
 -- Generates code to initialize static members of a class.
-codegenInitializer :: TypeEnv -> ClassDecl -> Either String String
-codegenInitializer env cls =
-  -- TODO: implement this.
-  pure "// initializer unimplemented\n"
+codegenInitializer :: ClassDecl -> Codegen ()
+codegenInitializer _ = putInstruction "// initializer unimplemented"
 
--- Generates code to allocate a class.
-codegenAlloc :: TypeEnv -> String -> [String] -> Either String String
-codegenAlloc env className layout =
-  let fnName = className ++ "zxalloc"
-   in pure $
-        unlines
-          [ fnName ++ ":",
-            "  movq $" ++ show (length layout * 8) ++ ", %rdi",
-            "  call malloc",
-            -- Zero out the memory in %eax..%eax + edi.
-            "  movq %rax, %rbx",
-            fnName ++ "_loop:",
-            "  cmp $0, %rdi",
-            "  jz " ++ fnName ++ "_fin",
-            "  movq $0, (%rbx)",
-            "  addq $8, %rbx",
-            "  subq $8, %rdi",
-            "  jmp " ++ fnName ++ "_loop",
-            fnName ++ "_fin:",
-            "  ret"
-          ]
+-- Generates code to allocate an instance of a class.
+codegenAlloc :: String -> VarLayout -> Codegen ()
+codegenAlloc clsName layout = do
+  let fnName = clsName ++ "zxalloc"
+  putInstructions
+    [ fnName ++ ":",
+      "  movq $" ++ show (length layout * 8) ++ ", %rdi",
+      "  call malloc",
+      "  addq $8, %rsp",
+      -- Zero out the memory in %rax..%rax + rdi.
+      "  movq %rax, %rbx",
+      fnName ++ "_loop:",
+      "  cmp $0, %rdi",
+      "  jz " ++ fnName ++ "_fin",
+      "  movq $0, (%rbx)",
+      "  addq $8, %rbx",
+      "  subq $8, %rdi",
+      "  jmp " ++ fnName ++ "_loop",
+      fnName ++ "_fin:",
+      "  ret"
+    ]
 
 -- Generates getters and setters for each member of a class.
-codegenGetSet :: TypeEnv -> String -> [String] -> Either String String
-codegenGetSet env className layout =
-  pure $ do
-    (idx, fieldName) <- zip [0 ..] layout
-    let offset = (idx + 1) * 8
-    unlines
-      [ className ++ "zxgetzx" ++ fieldName ++ ":",
+codegenGetSet :: String -> VarLayout -> Codegen ()
+codegenGetSet clsName layout =
+  forM_ (zip [0 ..] layout) $ \(idx, fieldName) -> do
+    let offset = idx * 8
+    putInstructions
+      [ clsName ++ "zxgetzx" ++ fieldName ++ ":",
         "  pushq %rbp",
         "  movq %rsp, %rbp",
         "  movq 16(%rbp), %rbx",
-        "  movq %rax, " ++ show offset ++ "(%rbx)",
+        "  mov " ++ show offset ++ "(%rbx), %rax",
         "  popq %rbp",
-        "  ret",
-        className ++ "zxsetzx" ++ fieldName ++ ":",
+        "  ret"
+      ]
+    putInstructions
+      [ clsName ++ "zxsetzx" ++ fieldName ++ ":",
         "  pushq %rbp",
-        "  movq %rsp, %rbp",
+        "  movq %rsp, rbp",
         "  movq 16(%rbp), %rbx",
         "  movq 24(%rbp), %rcx",
-        "  movq " ++ show offset ++ "(%rbx), %rcx",
+        "  movq %rcx, " ++ show offset ++ "(%rbx)",
         "  popq %rbp",
         "  ret"
       ]
 
--- Generates code for each function of a class.
-codegenFns :: TypeEnv -> ClassDecl -> Either String String
-codegenFns env (ClassDecl public static clsName members) =
-  concat
-    <$> sequence
-      ( do
-          member <- members
-          case member of
-            ClassVarDecl _ -> mempty
-            ClassFnDecl fnDecl -> pure $ codegenFn env clsName fnDecl
-      )
-
-codegenFn :: TypeEnv -> String -> FnDecl -> Either String String
-codegenFn env className (FnDecl public static retTyp fnName params body) =
+-- Generates code for a function of a class.
+codegenFn :: String -> ClassItem -> Codegen ()
+codegenFn clsName (ClassVarDecl vd) = pure ()
+codegenFn clsName (ClassFnDecl (FnDecl public static retTyp fnName params body)) =
   case body of
-    Right body ->
-      let mangledName = className ++ "zz" ++ fnName
+    Right body -> do
+      env <- gets stateEnv
+      let mangledName = clsName ++ "zd" ++ fnName
           bodyEnv = functionEnv env body
-          varLayout = layoutFunction body
-          frameSize = length varLayout * 8
-       in Right $
-            unlines
-              [ mangledName ++ ":",
-                "  pushq %rbp",
-                "  movq %rsp, %rbp",
-                "  subq $" ++ show frameSize ++ ", %rsp"
+          layout = layoutFunction body
+          frameSize = length layout * 8
+      putInstructions
+        [ mangledName ++ ":",
+          "  pushq %rbp",
+          "  movq %rsp, %rbp",
+          "  subq $" ++ show frameSize ++ ", %rsp"
+        ]
+      mapM_ (codegenStmt bodyEnv layout) body
+
+codegenStmt :: TypeEnv -> VarLayout -> ExecItem -> Codegen ()
+codegenStmt env layout stmt = case stmt of
+  Block body ->
+    -- BUG: this doesn't deal with new variable allocs right
+    mapM_ (codegenStmt env layout) body
+  ExecVarDecl decl -> pure () -- !!
+  ExecEval expr -> do
+    codegenExpr env layout expr
+    putInstruction "  addq $8, %rsp"
+  RetStmt expr -> do
+    codegenExpr env layout expr
+    putInstructions
+      [ "  popq %rax",
+        "  movq %rbp, %rsp",
+        "  popq %rbp",
+        "  ret"
+      ]
+  IfStmt condition body elseBody -> do
+    endLabel <- label
+    elseLabel <- label
+
+    codegenExpr env layout condition
+    putInstructions
+      [ "  popq %rax",
+        "  cmpq $0, %rax",
+        "  je " ++ elseLabel
+      ]
+    codegenStmt env layout body
+    putInstruction $ "  jmp " ++ endLabel
+
+    putInstruction $ elseLabel ++ ":"
+    codegenStmt env layout (fromMaybe (Block []) elseBody)
+    putInstruction $ endLabel ++ ":"
+  WhileStmt condition body -> do
+    startLabel <- label
+    endLabel <- label
+
+    putInstruction $ startLabel ++ ":"
+    codegenExpr env layout condition
+    putInstructions
+      [ "  popq %rax",
+        "  cmpq $0, %rax",
+        "  je " ++ endLabel
+      ]
+    codegenStmt env layout body
+    putInstructions
+      [ "  jmp " ++ startLabel,
+        endLabel ++ ":"
+      ]
+  ForStmt init condition increment body ->
+    -- fuck it, let's convert this into a while loop.
+    codegenStmt env layout $
+      Block
+        [ ExecEval init,
+          WhileStmt condition $
+            Block
+              [ body,
+                ExecEval increment
               ]
-              ++ concatMap (codegenStmt bodyEnv varLayout) body
-    Left externName -> undefined
-
-codegenStmt :: TypeEnv -> [String] -> ExecItem -> String
-codegenStmt env layout item = case item of
-  Block body -> undefined
-  ExecVarDecl decl -> undefined
-  ExecEval expr ->
-    codegenExpr env layout expr
-      ++ unlines
-        [ "  addq $8, %rsp"
         ]
-  RetStmt expr ->
-    codegenExpr env layout expr
-      ++ unlines
-        [ "  popq %rax",
-          "  mov %rbp, %rsp",
-          "  popq %rbp",
-          "  ret"
-        ]
-  IfStmt condition body elseBody -> undefined
-  WhileStmt condition body -> undefined
-  ForStmt init condition increment body -> undefined
 
-codegenExpr :: TypeEnv -> [String] -> Expr -> String
+codegenExpr :: TypeEnv -> VarLayout -> Expr -> Codegen ()
 codegenExpr env layout expr = case expr of
   Assignment l r -> undefined
   AddOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
@@ -300,21 +375,22 @@ codegenExpr env layout expr = case expr of
   Increment _ -> codegenExpr env layout $ desugarArithmetic expr
   Decrement _ -> codegenExpr env layout $ desugarArithmetic expr
   Negate _ -> codegenExpr env layout $ desugarArithmetic expr
-  EqOp l r ->
-    concat
-      [ codegenExpr env layout l,
-        codegenExpr env layout r,
-        unlines
-          [ "  popq %rax",
-            "  popq %rbx",
-            "  cmpq %rax,%rbx",
-            "  je eq_success",
-            "  pushq $0",
-            "  jmp eq_end",
-            "eq_success:",
-            "  pushq $1",
-            "eq_end:"
-          ]
+  EqOp l r -> do
+    codegenExpr env layout l
+    codegenExpr env layout r
+
+    successLabel <- label
+    endLabel <- label
+    putInstructions
+      [ "  popq %rax",
+        "  popq %rbx",
+        "  cmpq %rax,%rbx",
+        "  je " ++ successLabel,
+        "  pushq $0",
+        "  jmp " ++ endLabel,
+        successLabel ++ ":",
+        "  pushq $1",
+        endLabel ++ ":"
       ]
   NeqOp l r -> undefined
   GtOp l r -> undefined
@@ -325,35 +401,47 @@ codegenExpr env layout expr = case expr of
   OrOp l r -> undefined
   NotOp e -> undefined
   CallOp e params -> do
-    -- TODO: add error handling
-    let DotOp eMain methodName = e
-        Right (ObjectType eTyp) = typeckExpr env eMain
-        Just (ClassType eClassName eClass) = lookupType env eTyp
-        functionName = intercalate "zd" eTyp ++ methodName
-    concat
-      [ codegenExpr env layout eMain,
-        concat (codegenExpr env layout <$> params),
-        unlines
-          [ "  call " ++ functionName,
-            "  addq $" ++ show ((length params + 1) * 8) ++ ", %esp",
-            "  pushq %eax"
-          ]
+    (eMain, methodName) <- case e of
+      DotOp l r -> pure (l, r)
+      _ -> throwE "function call on something not a method"
+    eTyp <- case typeckExpr env eMain of
+      Right (ObjectType t) -> pure t
+      Right _ -> throwE "static calls unimplemented"
+      Left typeError -> throwE typeError
+
+    -- This can't fail because typeckExpr always returns a valid type.
+    let Just (ClassType eClassName eClass) = lookupType env eTyp
+        functionName = intercalate "zd" (eTyp ++ [methodName])
+
+    mapM_ (codegenExpr env layout) (reverse params)
+    codegenExpr env layout eMain
+    putInstructions
+      [ "  call " ++ functionName,
+        "  addq $" ++ show ((length params + 1) * 8) ++ ", %rsp",
+        "  pushq %rax"
       ]
   LiteralExpr lit -> case lit of
-    IntLit n -> "  pushq $" ++ show n ++ "\n"
+    IntLit n -> putInstruction $ "  pushq $" ++ show n
     RealLit n ->
-      "  pushq $"
-        ++ show
-          ( unsafePerformIO $
-              do
-                alloca $ \ptr -> do
-                  poke ptr n
-                  peek (castPtr ptr :: Ptr Int64)
-          )
-        ++ "\n"
+      putInstruction $
+        "  pushq $"
+          ++ show
+            ( unsafePerformIO $
+                do
+                  alloca $ \ptr -> do
+                    poke ptr n
+                    peek (castPtr ptr :: Ptr Int64)
+            )
     CharLit c -> undefined
     StringLit s -> undefined
-  VarExpr varname -> "_varexpr_\n"
+  VarExpr varname -> do
+    varOffset <- case lookup varname (zip layout [1 ..]) of
+      Just offset -> pure offset
+      Nothing -> throwE $ "undefined variable " ++ varname
+    putInstructions
+      [ "  mov " ++ show (-varOffset * 8) ++ "(%rbp), %rax",
+        "  pushq %rax"
+      ]
   NewArray typ len -> undefined
   NewClass typ params -> undefined
 
