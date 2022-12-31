@@ -1,7 +1,9 @@
 module Typeck
   ( J0Type (..),
     TypeEnv (..),
+    typeckExpr,
     lookupType,
+    desugarArithmetic,
     toplevelTypeEnv,
     functionEnv,
   )
@@ -82,10 +84,12 @@ typeckExpr env expr = case expr of
     lt <- typeckExpr env l
     rt <- typeckExpr env r
     typEq lt rt
+    pure $ ObjectType ["boolean"]
   NeqOp l r -> do
     lt <- typeckExpr env l
     rt <- typeckExpr env r
     typEq lt rt
+    pure $ ObjectType ["boolean"]
   GtOp _ _ -> typeckExpr env $ desugarArithmetic expr
   LtOp _ _ -> typeckExpr env $ desugarArithmetic expr
   GteOp _ _ -> typeckExpr env $ desugarArithmetic expr

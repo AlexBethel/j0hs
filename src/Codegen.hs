@@ -94,8 +94,69 @@
 
 module Codegen (codegen) where
 
+import Data.Coerce (coerce)
+import Data.Int (Int64)
+import Data.List (intercalate)
+import Foreign
+  ( Int64,
+    Ptr,
+    Storable (peek, poke),
+    alloca,
+    castPtr,
+  )
 import Parser
-import Typeck (TypeEnv, functionEnv, toplevelTypeEnv)
+  ( ClassDecl (ClassDecl),
+    ClassItem (ClassFnDecl, ClassVarDecl),
+    ExecItem
+      ( Block,
+        ExecEval,
+        ExecVarDecl,
+        ForStmt,
+        IfStmt,
+        RetStmt,
+        WhileStmt
+      ),
+    Expr
+      ( AddOp,
+        AndOp,
+        Assignment,
+        CallOp,
+        Decrement,
+        DivOp,
+        DotOp,
+        EqOp,
+        GtOp,
+        GteOp,
+        Increment,
+        LiteralExpr,
+        LtOp,
+        LteOp,
+        ModOp,
+        MulOp,
+        Negate,
+        NeqOp,
+        NewArray,
+        NewClass,
+        NotOp,
+        OrOp,
+        SubOp,
+        VarExpr
+      ),
+    FnDecl (FnDecl),
+    Literal (CharLit, IntLit, RealLit, StringLit),
+    SourceFile (SourceFile),
+    VarDecl (VarDecl),
+  )
+import System.IO.Unsafe (unsafePerformIO)
+import Typeck
+  ( J0Type (ClassType, ObjectType),
+    TypeEnv,
+    desugarArithmetic,
+    functionEnv,
+    lookupType,
+    toplevelTypeEnv,
+    typeckExpr,
+  )
 
 -- Generates x86 assembly from a list of source files. Returns either
 -- an error message, or the complete assembly code of the program.
@@ -231,15 +292,30 @@ codegenStmt env layout item = case item of
 codegenExpr :: TypeEnv -> [String] -> Expr -> String
 codegenExpr env layout expr = case expr of
   Assignment l r -> undefined
-  AddOp l r -> undefined
-  SubOp l r -> undefined
-  MulOp l r -> undefined
-  DivOp l r -> undefined
-  ModOp l r -> undefined
-  Increment e -> undefined
-  Decrement e -> undefined
-  Negate e -> undefined
-  EqOp l r -> undefined
+  AddOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  SubOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  MulOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  DivOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  ModOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  Increment _ -> codegenExpr env layout $ desugarArithmetic expr
+  Decrement _ -> codegenExpr env layout $ desugarArithmetic expr
+  Negate _ -> codegenExpr env layout $ desugarArithmetic expr
+  EqOp l r ->
+    concat
+      [ codegenExpr env layout l,
+        codegenExpr env layout r,
+        unlines
+          [ "  popq %rax",
+            "  popq %rbx",
+            "  cmpq %rax,%rbx",
+            "  je eq_success",
+            "  pushq $0",
+            "  jmp eq_end",
+            "eq_success:",
+            "  pushq $1",
+            "eq_end:"
+          ]
+      ]
   NeqOp l r -> undefined
   GtOp l r -> undefined
   LtOp l r -> undefined
@@ -248,13 +324,36 @@ codegenExpr env layout expr = case expr of
   AndOp l r -> undefined
   OrOp l r -> undefined
   NotOp e -> undefined
-  CallOp e params -> undefined
+  CallOp e params -> do
+    -- TODO: add error handling
+    let DotOp eMain methodName = e
+        Right (ObjectType eTyp) = typeckExpr env eMain
+        Just (ClassType eClassName eClass) = lookupType env eTyp
+        functionName = intercalate "zd" eTyp ++ methodName
+    concat
+      [ codegenExpr env layout eMain,
+        concat (codegenExpr env layout <$> params),
+        unlines
+          [ "  call " ++ functionName,
+            "  addq $" ++ show ((length params + 1) * 8) ++ ", %esp",
+            "  pushq %eax"
+          ]
+      ]
   LiteralExpr lit -> case lit of
-    IntLit n -> "  push $" ++ show n ++ "\n"
-    RealLit n -> undefined
+    IntLit n -> "  pushq $" ++ show n ++ "\n"
+    RealLit n ->
+      "  pushq $"
+        ++ show
+          ( unsafePerformIO $
+              do
+                alloca $ \ptr -> do
+                  poke ptr n
+                  peek (castPtr ptr :: Ptr Int64)
+          )
+        ++ "\n"
     CharLit c -> undefined
     StringLit s -> undefined
-  VarExpr varname -> undefined
+  VarExpr varname -> "_varexpr_\n"
   NewArray typ len -> undefined
   NewClass typ params -> undefined
 
