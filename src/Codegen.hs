@@ -287,21 +287,34 @@ codegenGetSet clsName layout =
 -- Generates code for a function of a class.
 codegenFn :: String -> ClassItem -> Codegen ()
 codegenFn clsName (ClassVarDecl vd) = pure ()
-codegenFn clsName (ClassFnDecl (FnDecl public static retTyp fnName params body)) =
+codegenFn clsName (ClassFnDecl (FnDecl public static retTyp fnName params body)) = do
+  let mangledName = clsName ++ "zd" ++ fnName
+  putInstruction $ ".globl " ++ mangledName
+  putInstruction $ mangledName ++ ":"
   case body of
     Right body -> do
       env <- gets stateEnv
-      let mangledName = clsName ++ "zd" ++ fnName
-          bodyEnv = functionEnv env body
+      let bodyEnv = functionEnv env body
           layout = layoutFunction body
           frameSize = length layout * 8
       putInstructions
-        [ mangledName ++ ":",
-          "  pushq %rbp",
+        [ "  pushq %rbp",
           "  movq %rsp, %rbp",
           "  subq $" ++ show frameSize ++ ", %rsp"
         ]
       mapM_ (codegenStmt bodyEnv layout) body
+    Left externName ->
+      -- We only support extern functions with up to 6 parameters.
+      putInstructions
+        [ "  movq 8(%rsp), %rdi",
+          "  movq 16(%rsp), %rsi",
+          "  movq 24(%rsp), %rdx",
+          "  movq 32(%rsp), %rcx",
+          "  movq 40(%rsp), %r8",
+          "  movq 48(%rsp), %r9",
+          -- Tail call.
+          "  jmp " ++ externName
+        ]
 
 codegenStmt :: TypeEnv -> VarLayout -> ExecItem -> Codegen ()
 codegenStmt env layout stmt = case stmt of

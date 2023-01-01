@@ -117,11 +117,13 @@ typeckExpr env expr = case expr of
         let Just (ClassType className classMembers) = lookupType env objname
          in case lookup sub classMembers of
               Just member -> pure member
-              _ ->
+              Nothing ->
                 Left
                   ( "missing member " ++ sub
                       ++ " of expression of type "
                       ++ show et
+                      ++ " (members are " ++ show classMembers ++ ")"
+                      ++ " (env is " ++ show env ++ ")"
                   )
       MethodType _ _ -> Left "illegal dot-subscript of method"
       ArrayType _ -> Left "array dot-subscript unimplemented"
@@ -195,8 +197,7 @@ desugarArithmetic e = case e of
 -- Builds a TypeEnv from a list of source files.
 toplevelTypeEnv :: [SourceFile] -> TypeEnv
 toplevelTypeEnv files =
-  TypeEnv $
-    builtinTypeEnv ++ do
+  TypeEnv $ do
       SourceFile package imports classes <- files
       ClassDecl public static name members <- classes
       pure
@@ -227,17 +228,6 @@ toplevelTypeEnv files =
                       paramTypes = nameToType . fst <$> fParams
                   pure (fName, MethodType paramTypes retTyp)
         )
-
-builtinTypeEnv :: [(String, J0Type)]
-builtinTypeEnv =
-  [ ("boolean", ClassType "boolean" []),
-    ("char", ClassType "char" []),
-    ("double", ClassType "double" []),
-    ("float", ClassType "float" []),
-    ("int", ClassType "int" []),
-    ("long", ClassType "long" []),
-    ("void", ClassType "void" [])
-  ]
 
 -- Builds a type environment for a function or block within a larger
 -- type environment.

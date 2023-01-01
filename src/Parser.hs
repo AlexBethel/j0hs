@@ -153,27 +153,20 @@ data ExecItem
 
 reservedWords :: [String]
 reservedWords =
-  [ "boolean",
-    "break",
-    "byte",
+  [ "break",
     "case",
     "class",
     "continue",
     "default",
-    "double",
     "else",
-    "float",
     "for",
     "if",
     "instanceof",
-    "int",
-    "long",
     "new",
     "public",
     "return",
     "static",
     "switch",
-    "void",
     "while"
   ]
 
@@ -262,7 +255,7 @@ parseIdent =
     -- We use `try` here to prevent reading reserved words.
     ( try $ do
         -- Variable names have to start with a letter.
-        word <- (:) <$> letter <*> many alphaNum
+        word <- (:) <$> (letter <|> char '_') <*> many (alphaNum <|> char '_')
         if word `elem` reservedWords
           then fail ("got reserved word `" ++ word ++ "`")
           else pure word
@@ -387,24 +380,12 @@ parseClassDecl =
     <*> (word "class" *> parseIdent)
     <*> between (sym '{') (sym '}') (many parseClassItem)
 
-parseBuiltinType :: Parser TypeName
-parseBuiltinType =
-  choice
-    ( map
-        (\tname -> word tname $> BuiltinTypeName tname)
-        primTypes
-    )
-
 parseClassType :: Parser TypeName
 parseClassType = ClassTypeName <$> parseIdent `sepBy` sym '.'
 
 parseTypeName :: Parser TypeName
 parseTypeName = do
-  base <-
-    choice
-      [ parseBuiltinType,
-        parseClassType
-      ]
+  base <- parseClassType
   -- N.B. Parsing array types directly would be left-recursive; we
   -- instead parse them here as suffixes.
   arrSuffixes <- many (sym '[' <* sym ']')

@@ -1,21 +1,13 @@
 public class CodegenTest {
-    int someVal;
-
-    public int something() {
-        CodegenTest a;
-        a.something();
-        20;
-        if (a == a) {
-            return 0;
-        }
-        return 10;
-    }
-
-    public int fortest() {
-        int i;
-        for (1; i == i; i) {
-            i;
+    public int main() {
+        if (2 + 2 == 4) {
+            (5 + 6 + 7).print();
         }
         return 0;
     }
+}
+
+public class int {
+    public int __add__(int other) extern int_add;
+    public void print() extern int_print;
 }
