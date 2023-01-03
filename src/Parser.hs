@@ -492,7 +492,7 @@ expBase =
 eGroupAssignment :: Parser Expr -> Parser Expr
 eGroupAssignment =
   parseInfixes
-    [ EqOp <$ sym '='
+    [ Assignment <$ sym '='
     ]
     AssocLeft
 

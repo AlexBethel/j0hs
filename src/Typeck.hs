@@ -185,6 +185,7 @@ desugarArithmetic e = case e of
   Increment x -> Assignment x (AddOp x (LiteralExpr (IntLit 1)))
   Decrement x -> Assignment x (SubOp x (LiteralExpr (IntLit 1)))
   Negate x -> CallOp (DotOp x "__negate__") []
+  NeqOp l r -> NotOp (EqOp l r)
   GtOp l r -> CallOp (DotOp l "__gt__") [r]
   LtOp l r -> CallOp (DotOp l "__lt__") [r]
   GteOp l r -> CallOp (DotOp l "__gte__") [r]

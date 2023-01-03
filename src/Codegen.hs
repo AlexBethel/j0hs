@@ -321,7 +321,13 @@ codegenStmt env layout stmt = case stmt of
   Block body ->
     -- BUG: this doesn't deal with new variable allocs right
     mapM_ (codegenStmt env layout) body
-  ExecVarDecl decl -> pure () -- !!
+  ExecVarDecl (VarDecl public static typ names) ->
+    forM_ names $ \(name, initval) ->
+      case initval of
+        Just i ->
+          codegenStmt env layout $
+            ExecEval (Assignment (VarExpr name) i)
+        Nothing -> pure ()
   ExecEval expr -> do
     codegenExpr env layout expr
     putInstruction "  addq $8, %rsp"
@@ -379,7 +385,19 @@ codegenStmt env layout stmt = case stmt of
 
 codegenExpr :: TypeEnv -> VarLayout -> Expr -> Codegen ()
 codegenExpr env layout expr = case expr of
-  Assignment l r -> undefined
+  Assignment l r -> do
+    lVar <- case l of
+      VarExpr name -> pure name
+      DotOp obj property -> throwE "dot assignment not implemented"
+      _ -> throwE "assignment on something not a variable"
+    lOffset <- case lookup lVar (zip layout [1 ..]) of
+      Just offset -> pure offset
+      Nothing -> throwE $ "undefined variable " ++ lVar
+    codegenExpr env layout r
+    putInstructions
+      [ "  movq (%rsp), %rax",
+        "  movq %rax, " ++ show (-lOffset * 8) ++ "(%rbp)"
+      ]
   AddOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
   SubOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
   MulOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
@@ -405,14 +423,14 @@ codegenExpr env layout expr = case expr of
         "  pushq $1",
         endLabel ++ ":"
       ]
-  NeqOp l r -> undefined
-  GtOp l r -> undefined
-  LtOp l r -> undefined
-  GteOp l r -> undefined
-  LteOp l r -> undefined
-  AndOp l r -> undefined
-  OrOp l r -> undefined
-  NotOp e -> undefined
+  NeqOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  GtOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  LtOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  GteOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  LteOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  AndOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  OrOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
+  NotOp _ -> codegenExpr env layout $ desugarArithmetic expr
   CallOp e params -> do
     (eMain, methodName) <- case e of
       DotOp l r -> pure (l, r)
