@@ -13,7 +13,8 @@ module Parser
   )
 where
 
-import Control.Monad (void)
+import Control.Monad (replicateM, void)
+import Data.Char (isAlpha, isDigit, toLower)
 import Data.Functor (($>))
 import Data.Maybe (isJust)
 import Text.Parsec
@@ -210,18 +211,43 @@ parseChar =
     )
     <?> "char literal"
 
-stringChar = noneOf ['\\', '\"'] <|> char '\\' *> (backslash <$> anyChar)
+stringChar :: Parser Char
+stringChar = noneOf ['\\', '\"'] <|> char '\\' *> backslash
 
--- TODO: octal, hex & Unicode escapes.
-backslash c = case c of
-  'a' -> '\x07'
-  'b' -> '\x08'
-  'f' -> '\x0C'
-  'n' -> '\x0A'
-  'r' -> '\x0D'
-  't' -> '\x09'
-  'v' -> '\x0B'
-  c -> c
+backslash :: Parser Char
+backslash =
+  choice
+    [ char 'a' $> '\x07',
+      char 'b' $> '\x08',
+      char 'f' $> '\x0C',
+      char 'n' $> '\x0A',
+      char 'r' $> '\x0D',
+      char 't' $> '\x09',
+      char 'v' $> '\x0B',
+      char '?' $> '?',
+      char 'x' *> (toEnum <$> 2 `digitsInBase` 16),
+      char 'u' *> (toEnum <$> 4 `digitsInBase` 16),
+      toEnum <$> 3 `digitsInBase` 8,
+      anyChar $> '?'
+    ]
+  where
+    digitsInBase :: Int -> Int -> Parser Int
+    num `digitsInBase` base =
+      do
+        digits <- replicateM num $ do
+          c <- anyChar
+          n <- case fromHex c of
+            Just v -> pure v
+            Nothing -> fail $ "invlid digit " ++ show c
+          if n > base
+            then fail ("digit " ++ show c ++ " invalid base " ++ show base)
+            else pure n
+        pure $ foldl (\x y -> x * base + y) 0 digits
+
+fromHex :: Char -> Maybe Int
+fromHex c | isDigit c = Just $ fromEnum c - fromEnum '0'
+fromHex c | isAlpha c = Just $ fromEnum (toLower c) - fromEnum 'a' + 10
+fromHex c = Nothing
 
 -- Parse a number, i.e., either an integer or a decimal.
 parseNumber :: Parser Literal
@@ -615,10 +641,12 @@ parseImport =
 
 parseSourceFile :: Parser SourceFile
 parseSourceFile =
-  SourceFile
-    <$> (many space *> optionMaybe parsePackage)
-    <*> many parseImport
-    <*> many parseClassDecl
+  many space
+    *> ( SourceFile
+           <$> optionMaybe parsePackage
+           <*> many parseImport
+           <*> many parseClassDecl
+       )
     <* eof
 
 parseFiles :: [String] -> IO (Either String [SourceFile])
