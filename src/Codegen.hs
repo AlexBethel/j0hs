@@ -98,9 +98,10 @@ import Control.Monad (forM_)
 import Control.Monad.State (StateT (runStateT), get, gets, put)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
-import Control.Monad.Trans.Writer (Writer, runWriter, tell)
+import Control.Monad.Trans.Writer.CPS (Writer, runWriter, tell)
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
+import Debug.Trace (trace)
 import Foreign
   ( Int64,
     Ptr,
@@ -225,6 +226,12 @@ codegenClass cls = do
 
 type VarLayout = [String]
 
+data FnLayout = FnLayout
+  { fnLayoutSize :: Int,
+    fnLayoutElems :: [(String, Int)]
+  }
+  deriving (Show)
+
 genLayout :: [ClassItem] -> VarLayout
 genLayout members = do
   member <- members
@@ -269,7 +276,7 @@ codegenGetSet clsName layout =
         "  pushq %rbp",
         "  movq %rsp, %rbp",
         "  movq 16(%rbp), %rbx",
-        "  mov " ++ show offset ++ "(%rbx), %rax",
+        "  movq " ++ show offset ++ "(%rbx), %rax",
         "  popq %rbp",
         "  ret"
       ]
@@ -294,13 +301,13 @@ codegenFn clsName (ClassFnDecl (FnDecl public static retTyp fnName params body))
   case body of
     Right body -> do
       env <- gets stateEnv
-      let bodyEnv = functionEnv env body
-          layout = layoutFunction body
-          frameSize = length layout * 8
+      let bodyEnv = functionEnv env params body
+          layout = layoutFunction (snd <$> params) body
+      trace (show layout) (pure ())
       putInstructions
         [ "  pushq %rbp",
           "  movq %rsp, %rbp",
-          "  subq $" ++ show frameSize ++ ", %rsp"
+          "  subq $" ++ show (fnLayoutSize layout) ++ ", %rsp"
         ]
       mapM_ (codegenStmt bodyEnv layout) body
     Left externName ->
@@ -316,7 +323,7 @@ codegenFn clsName (ClassFnDecl (FnDecl public static retTyp fnName params body))
           "  jmp " ++ externName
         ]
 
-codegenStmt :: TypeEnv -> VarLayout -> ExecItem -> Codegen ()
+codegenStmt :: TypeEnv -> FnLayout -> ExecItem -> Codegen ()
 codegenStmt env layout stmt = case stmt of
   Block body ->
     -- BUG: this doesn't deal with new variable allocs right
@@ -383,20 +390,20 @@ codegenStmt env layout stmt = case stmt of
               ]
         ]
 
-codegenExpr :: TypeEnv -> VarLayout -> Expr -> Codegen ()
+codegenExpr :: TypeEnv -> FnLayout -> Expr -> Codegen ()
 codegenExpr env layout expr = case expr of
   Assignment l r -> do
     lVar <- case l of
       VarExpr name -> pure name
       DotOp obj property -> throwE "dot assignment not implemented"
       _ -> throwE "assignment on something not a variable"
-    lOffset <- case lookup lVar (zip layout [1 ..]) of
+    lOffset <- case lookup lVar (fnLayoutElems layout) of
       Just offset -> pure offset
-      Nothing -> throwE $ "undefined variable " ++ lVar
+      Nothing -> throwE $ "codegenExpr assignment: undefined variable " ++ lVar
     codegenExpr env layout r
     putInstructions
       [ "  movq (%rsp), %rax",
-        "  movq %rax, " ++ show (-lOffset * 8) ++ "(%rbp)"
+        "  movq %rax, " ++ show lOffset ++ "(%rbp)"
       ]
   AddOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
   SubOp _ _ -> codegenExpr env layout $ desugarArithmetic expr
@@ -435,22 +442,29 @@ codegenExpr env layout expr = case expr of
     (eMain, methodName) <- case e of
       DotOp l r -> pure (l, r)
       _ -> throwE "function call on something not a method"
-    eTyp <- case typeckExpr env eMain of
-      Right (ObjectType t) -> pure t
-      Right _ -> throwE "static calls unimplemented"
+    case typeckExpr env eMain of
+      Right (ObjectType eTyp) -> do
+        -- This can't fail because typeckExpr always returns a valid type.
+        let Just (ClassType eClassName eClass) = lookupType env eTyp
+            functionName = intercalate "zd" (eTyp ++ [methodName])
+
+        mapM_ (codegenExpr env layout) (reverse params)
+        codegenExpr env layout eMain
+        putInstructions
+          [ "  call " ++ functionName,
+            "  addq $" ++ show ((length params + 1) * 8) ++ ", %rsp",
+            "  pushq %rax"
+          ]
+      Right (ClassType name members) -> do
+        let functionName = name ++ "zd" ++ methodName
+        mapM_ (codegenExpr env layout) (reverse params)
+        putInstructions
+          [ "  call " ++ functionName,
+            "  addq $" ++ show (length params * 8) ++ ", %rsp",
+            "  pushq %rax"
+          ]
+      Right _ -> throwE "method call on something not a class or object"
       Left typeError -> throwE typeError
-
-    -- This can't fail because typeckExpr always returns a valid type.
-    let Just (ClassType eClassName eClass) = lookupType env eTyp
-        functionName = intercalate "zd" (eTyp ++ [methodName])
-
-    mapM_ (codegenExpr env layout) (reverse params)
-    codegenExpr env layout eMain
-    putInstructions
-      [ "  call " ++ functionName,
-        "  addq $" ++ show ((length params + 1) * 8) ++ ", %rsp",
-        "  pushq %rax"
-      ]
   LiteralExpr lit -> case lit of
     IntLit n -> putInstruction $ "  pushq $" ++ show n
     RealLit n ->
@@ -466,11 +480,11 @@ codegenExpr env layout expr = case expr of
     CharLit c -> undefined
     StringLit s -> undefined
   VarExpr varname -> do
-    varOffset <- case lookup varname (zip layout [1 ..]) of
+    varOffset <- case lookup varname (fnLayoutElems layout) of
       Just offset -> pure offset
-      Nothing -> throwE $ "undefined variable " ++ varname
+      Nothing -> throwE $ "codegenExpr var: undefined variable " ++ varname
     putInstructions
-      [ "  mov " ++ show (-varOffset * 8) ++ "(%rbp), %rax",
+      [ "  movq " ++ show varOffset ++ "(%rbp), %rax",
         "  pushq %rax"
       ]
   NewArray typ len -> undefined
@@ -478,11 +492,26 @@ codegenExpr env layout expr = case expr of
 
 -- Given a block, calculates a layout of variables within that block.
 -- Returns the list of stored variables in order.
-layoutFunction :: [ExecItem] -> [String]
-layoutFunction items = do
-  item <- items
-  case item of
-    ExecVarDecl (VarDecl public static typ names) -> do
-      (name, initval) <- names
-      pure name
-    _ -> mempty
+layoutFunction :: [String] -> [ExecItem] -> FnLayout
+layoutFunction params items =
+  let vars = do
+        item <- items
+        case item of
+          ExecVarDecl (VarDecl public static typ names) -> do
+            (name, initval) <- names
+            pure name
+          _ -> mempty
+      varLocations = do
+        -- Variables are all 8 bytes wide, and are placed in reverse
+        -- order behind the base pointer.
+        idx <- [1 ..]
+        pure $ -8 * idx
+      paramLocations = do
+        -- Parameters are also 8 bytes wide, and are placed in front
+        -- of the base pointer, but with an offset of 2 qwords (one
+        -- for the old base pointer, one for the return address).
+        idx <- [2 ..]
+        pure $ 8 * idx
+   in FnLayout
+        (length vars * 8)
+        (zip vars varLocations ++ zip params paramLocations)

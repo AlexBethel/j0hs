@@ -1,6 +1,6 @@
 public class Main {
     public static void main() {
-        int i = Statics.one();
+        int i = Main.one();
         i.print();
         return 0;
     }

@@ -199,42 +199,42 @@ desugarArithmetic e = case e of
 toplevelTypeEnv :: [SourceFile] -> TypeEnv
 toplevelTypeEnv files =
   TypeEnv $ do
-      SourceFile package imports classes <- files
-      ClassDecl public static name members <- classes
-      pure
-        ( name,
-          ClassType name $ do
-            member <- members
-            case member of
-              ClassVarDecl
-                ( VarDecl
-                    _vPublic
-                    vStatic
-                    vType
-                    vNames
-                  ) -> do
-                  (vName, _initVal) <- vNames
-                  let typ = nameToType vType
-                  pure (vName, typ)
-              ClassFnDecl
-                ( FnDecl
-                    _fPublic
-                    _fStatic
-                    fRet
-                    fName
-                    fParams
-                    _fBody
-                  ) -> do
-                  let retTyp = nameToType fRet
-                      paramTypes = nameToType . fst <$> fParams
-                  pure (fName, MethodType paramTypes retTyp)
-        )
+    SourceFile package imports classes <- files
+    ClassDecl public static name members <- classes
+    pure
+      ( name,
+        ClassType name $ do
+          member <- members
+          case member of
+            ClassVarDecl
+              ( VarDecl
+                  _vPublic
+                  vStatic
+                  vType
+                  vNames
+                ) -> do
+                (vName, _initVal) <- vNames
+                let typ = nameToType vType
+                pure (vName, typ)
+            ClassFnDecl
+              ( FnDecl
+                  _fPublic
+                  _fStatic
+                  fRet
+                  fName
+                  fParams
+                  _fBody
+                ) -> do
+                let retTyp = nameToType fRet
+                    paramTypes = nameToType . fst <$> fParams
+                pure (fName, MethodType paramTypes retTyp)
+      )
 
--- Builds a type environment for a function or block within a larger
--- type environment.
-functionEnv :: TypeEnv -> [ExecItem] -> TypeEnv
-functionEnv (TypeEnv parent) items =
-  TypeEnv (childEnv items ++ parent)
+-- Builds a type environment for a function with the given parameters
+-- or block within a larger type environment.
+functionEnv :: TypeEnv -> [(TypeName, String)] -> [ExecItem] -> TypeEnv
+functionEnv (TypeEnv parent) args items =
+  TypeEnv (argEnv args ++ childEnv items ++ parent)
   where
     childEnv :: [ExecItem] -> [(String, J0Type)]
     childEnv items = do
@@ -244,3 +244,7 @@ functionEnv (TypeEnv parent) items =
           (name, initVal) <- names
           [(name, nameToType typ)]
         _ -> []
+    argEnv :: [(TypeName, String)] -> [(String, J0Type)]
+    argEnv args = do
+      (typename, argname) <- args
+      pure (argname, nameToType typename)
