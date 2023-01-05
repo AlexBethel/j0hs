@@ -303,7 +303,6 @@ codegenFn clsName (ClassFnDecl (FnDecl public static retTyp fnName params body))
       env <- gets stateEnv
       let bodyEnv = functionEnv env params body
           layout = layoutFunction (snd <$> params) body
-      trace (show layout) (pure ())
       putInstructions
         [ "  pushq %rbp",
           "  movq %rsp, %rbp",
