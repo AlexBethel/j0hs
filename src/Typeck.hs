@@ -122,8 +122,12 @@ typeckExpr env expr = case expr of
                   ( "missing member " ++ sub
                       ++ " of expression of type "
                       ++ show et
-                      ++ " (members are " ++ show classMembers ++ ")"
-                      ++ " (env is " ++ show env ++ ")"
+                      ++ " (members are "
+                      ++ show classMembers
+                      ++ ")"
+                      ++ " (env is "
+                      ++ show env
+                      ++ ")"
                   )
       MethodType _ _ -> Left "illegal dot-subscript of method"
       ArrayType _ -> Left "array dot-subscript unimplemented"
@@ -232,9 +236,22 @@ toplevelTypeEnv files =
 
 -- Builds a type environment for a function with the given parameters
 -- or block within a larger type environment.
-functionEnv :: TypeEnv -> [(TypeName, String)] -> [ExecItem] -> TypeEnv
-functionEnv (TypeEnv parent) args items =
-  TypeEnv (argEnv args ++ childEnv items ++ parent)
+functionEnv ::
+  TypeEnv ->
+  String ->
+  Bool ->
+  [(TypeName, String)] ->
+  [ExecItem] ->
+  TypeEnv
+functionEnv (TypeEnv parent) className static args items =
+  TypeEnv
+    ( concat
+        [ argEnv args,
+          childEnv items,
+          staticEnv className static,
+          parent
+        ]
+    )
   where
     childEnv :: [ExecItem] -> [(String, J0Type)]
     childEnv items = do
@@ -248,3 +265,5 @@ functionEnv (TypeEnv parent) args items =
     argEnv args = do
       (typename, argname) <- args
       pure (argname, nameToType typename)
+    staticEnv :: String -> Bool -> [(String, J0Type)]
+    staticEnv className static = [("this", ObjectType [className]) | static]

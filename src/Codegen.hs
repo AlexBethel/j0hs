@@ -301,8 +301,8 @@ codegenFn clsName (ClassFnDecl (FnDecl public static retTyp fnName params body))
   case body of
     Right body -> do
       env <- gets stateEnv
-      let bodyEnv = functionEnv env params body
-          layout = layoutFunction (snd <$> params) body
+      let bodyEnv = functionEnv env clsName static params body
+          layout = layoutFunction static (snd <$> params) body
       putInstructions
         [ "  pushq %rbp",
           "  movq %rsp, %rbp",
@@ -491,12 +491,12 @@ codegenExpr env layout expr = case expr of
 
 -- Given a block, calculates a layout of variables within that block.
 -- Returns the list of stored variables in order.
-layoutFunction :: [String] -> [ExecItem] -> FnLayout
-layoutFunction params items =
+layoutFunction :: Bool -> [String] -> [ExecItem] -> FnLayout
+layoutFunction static params items =
   let vars = do
         item <- items
         case item of
-          ExecVarDecl (VarDecl public static typ names) -> do
+          ExecVarDecl (VarDecl public _varStatic typ names) -> do
             (name, initval) <- names
             pure name
           _ -> mempty
@@ -509,8 +509,16 @@ layoutFunction params items =
         -- Parameters are also 8 bytes wide, and are placed in front
         -- of the base pointer, but with an offset of 2 qwords (one
         -- for the old base pointer, one for the return address).
-        idx <- [2 ..]
+        idx <- [(2 + if static then 0 else 1) ..]
         pure $ 8 * idx
+      -- If this is a static function, then there's a `this` object
+      -- right after the return address.
+      thisEntry = [("this", 2) | static]
    in FnLayout
         (length vars * 8)
-        (zip vars varLocations ++ zip params paramLocations)
+        ( concat
+            [ zip vars varLocations,
+              zip params paramLocations,
+              thisEntry
+            ]
+        )
